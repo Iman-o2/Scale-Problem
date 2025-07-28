@@ -1,0 +1,225 @@
+# --- Test Statistics Functions ---
+
+savage_test <- function(x, y) {
+  n <- length(x); m <- length(y); N <- n + m
+  combined <- c(x, y); ranks <- rank(combined)
+  z <- c(rep(0, n), rep(1, m))  
+  savage_scores <- map_dbl(1:N, ~sum(1/(N + 1 - ranks[.x]:N)))
+  S <- sum(savage_scores * z)
+  all_scores <- map_dbl(1:N, ~sum(1/(N + 1 - .x:N)))
+  E0 <- n * mean(all_scores)
+  Var0 <- (n*m)/(N*(N-1)) * sum((all_scores - mean(all_scores))^2)
+  (S - E0)/sqrt(Var0)
+}
+
+mood_test <- function(x, y) {
+  n <- length(x); m <- length(y); N <- n + m
+  R <- rank(c(x, y))[1:n]
+  M <- sum((R - (N + 1)/2)^2)
+  E0 <- n*(N^2 - 1)/12
+  Var0 <- n*m*(N + 1)*(N^2 - 4)/180
+  (M - E0)/sqrt(Var0)
+}
+
+klotz_test <- function(x, y) {
+  n <- length(x)
+  m <- length(y)
+  N <- n + m
+  combined <- c(x, y)
+  ranks <- rank(combined)
+  z <- c(rep(1, n), rep(0, m))  
+  inv_norm_quantiles <- qnorm(ranks / (N + 1))
+  K <- sum((inv_norm_quantiles^2) * z) 
+  
+  # Expected value under H0
+  all_scores <- qnorm((1:N)/(N+1))^2
+  E0 <- n * mean(all_scores)
+  
+  # Variance under H0
+  Var0 <- (n*m)/(N*(N-1)) * sum((all_scores - mean(all_scores))^2)
+  
+  # Standardized test statistic
+  K_std <- (K - E0) / sqrt(Var0)
+  return(K_std)
+}
+
+#Simulation
+
+simulate_klotz <- function(distr, n, m, theta, B = 10000) {
+  K_stats <- numeric(B)
+  
+  for (i in 1:B) {
+    if (distr == "Normal") {
+      x <- rnorm(n, mean = 0, sd = 1)
+      y <- rnorm(m, mean = 0, sd = theta)
+    } else if (distr == "Exponential") {
+      x <- rexp(n, rate = 1)
+      y <- rexp(m, rate = 1 / theta)
+    } else if (distr == "Cauchy") {
+      x <- rcauchy(n, location = 0, scale = 1)
+      y <- rcauchy(m, location = 0, scale = theta)
+    } else if (distr == "Geometric") {
+      x <- rgeom(n, prob = 0.5)
+      y <- rgeom(m, prob = theta / (1 + theta))
+    }
+    
+    K_stats[i] <- klotz_test(x, y)
+  }
+  
+  return(K_stats)
+}
+
+distributions <- c("Normal", "Exponential", "Cauchy", "Geometric")
+sample_sizes <- list(c(10, 12), c(70, 65), c(240, 250))
+theta_values <- c(1, 2, 6)
+
+set.seed(123)
+sim_results <- list()
+
+for (distr in distributions) {
+  for (sizes in sample_sizes) {
+    n <- sizes[1]
+    m <- sizes[2]
+    key <- paste(distr, "n=", n, "m=", m)
+    
+    
+    sim_H0 <- simulate_klotz(distr, n, m, theta = 1, B = 10000)
+    sim_H1_theta2 <- simulate_klotz(distr, n, m, theta = 2, B = 10000)
+    sim_H1_theta6 <- simulate_klotz(distr, n, m, theta = 6, B = 10000)
+    
+    sim_results[[key]] <- list(
+      H0 = sim_H0,
+      H1_theta2 = sim_H1_theta2,
+      H1_theta6 = sim_H1_theta6,
+      distr = distr,
+      n = n,
+      m = m
+    )
+  }
+}
+
+#Plotting under Null Ditribution
+
+plot_list_H0 <- list()
+
+for (i in seq_along(sim_results)) {
+  res <- sim_results[[i]]
+  df <- data.frame(K = res$H0)
+  
+  p <- ggplot(df, aes(x = K)) +
+    geom_histogram(
+      aes(y = ..density..),
+      bins = 30,
+      fill = "#69b3a2",
+      color = "white",
+      alpha = 0.8,
+      linewidth = 0.3
+    ) +
+    geom_density(color = "#404080", linewidth = 1.2) +
+    labs(
+      title = paste(res$distr, " (n =", res$n, ", m =", res$m, ")"),
+      x = "Standardized Klotz Statistic",
+      y = "Density"
+    ) +
+    theme_minimal(base_family = "Helvetica") +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major = element_line(color = "grey90"),
+      panel.grid.minor = element_blank()
+    )
+  
+  plot_list_H0[[i]] <- p
+}
+
+#Plotting under Alternatives
+
+plot_list_H1_theta2 <- list()
+
+for (i in seq_along(sim_results)) {
+  res <- sim_results[[i]]
+  df <- data.frame(K = res$H1_theta2)
+  
+  p <- ggplot(df, aes(x = K)) +
+    geom_histogram(
+      aes(y = ..density..),
+      bins = 30,
+      fill = "#69b3a2",
+      color = "white",
+      alpha = 0.8,
+      linewidth = 0.3
+    ) +
+    geom_density(color = "#404080", linewidth = 1.2) +
+    labs(
+      title = paste(res$distr, " (n =", res$n, ", m =", res$m, ")"),
+      x = "Standardized Klotz Statistic",
+      y = "Density"
+    ) +
+    theme_minimal(base_family = "Helvetica") +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major = element_line(color = "grey90"),
+      panel.grid.minor = element_blank()
+    )
+  
+  plot_list_H1_theta2[[i]] <- p
+}
+
+plot_list_H1_theta6 <- list()
+
+for (i in seq_along(sim_results)) {
+  res <- sim_results[[i]]
+  df <- data.frame(K = res$H1_theta6)
+  
+  p <- ggplot(df, aes(x = K)) +
+    geom_histogram(
+      aes(y = ..density..),
+      bins = 30,
+      fill = "#69b3a2",
+      color = "white",
+      alpha = 0.8,
+      linewidth = 0.3
+    ) +
+    geom_density(color = "#404080", linewidth = 1.2) +
+    labs(
+      title = paste(res$distr, " (n =", res$n, ", m =", res$m, ")"),
+      x = "Standardized Klotz Statistic",
+      y = "Density"
+    ) +
+    theme_minimal(base_family = "Helvetica") +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major = element_line(color = "grey90"),
+      panel.grid.minor = element_blank()
+    )
+  
+  plot_list_H1_theta6[[i]] <- p
+}
+
+#Q-Q Plot
+
+qq_plots <- list()
+
+for (i in seq_along(sim_results)) {
+  res <- sim_results[[i]]
+  qq_data <- data.frame(K = res$H0)
+  
+  qq_plot <- ggplot(qq_data, aes(sample = K)) +
+    stat_qq(distribution = qnorm, size = 1) +
+    stat_qq_line(distribution = qnorm, color = "red", linewidth = 1) +
+    labs(
+      title = paste("(n =", res$n, ", m =", res$m, ")"),
+      x = "Theoretical Quantiles",
+      y = "Sample Quantiles"
+    ) +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 10),
+          plot.subtitle = element_text(size = 8))
+  
+  qq_plots[[i]] <- qq_plot
+}
